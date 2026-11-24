@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Editor de boot · Civic ES1</title>
+<style>
+  :root { color-scheme: dark; font: 15px system-ui; background: #111416; color: #eef0eb; }
+  * { box-sizing: border-box; }
+  body { margin: 0 auto; padding: clamp(14px, 4vw, 48px); max-width: 1330px; }
+  h1 { font-size: clamp(26px, 5vw, 44px); margin: 0; letter-spacing: -.04em; }
+  h2 { font-size: 16px; margin: 0 0 10px; }
+  p { color: #acb4ad; margin: 6px 0 16px; }
+  header, .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  header { justify-content: space-between; margin-bottom: 20px; }
+  section { background: #1a1e20; border: 1px solid #343a3a; border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+  button, input { font: inherit; border: 1px solid #49514d; border-radius: 6px; background: #242a2b; color: inherit; padding: 7px 10px; }
+  button { cursor: pointer; }
+  button:hover:not(:disabled) { border-color: #bce77f; }
+  button:disabled { opacity: .45; cursor: default; }
+  button[aria-pressed="true"], .primary { background: #bce77f; color: #1c2612; border-color: #bce77f; }
+  input[type=number] { width: 90px; }
+  input[type=checkbox] { accent-color: #bce77f; }
+  #palette { display: flex; flex-wrap: wrap; gap: 5px; }
+  #palette button { width: 30px; height: 30px; padding: 0; font-size: 12px; }
+  #palette button[aria-pressed=true] { outline: 2px solid #bce77f; outline-offset: 2px; }
+  .surface { position: relative; margin: 14px 0 8px; background: #000; }
+  canvas { image-rendering: pixelated; display: block; }
+  #screen { width: 100%; aspect-ratio: 4; touch-action: none; cursor: crosshair; }
+  .surface.grid::after { content: ""; position: absolute; inset: 0; pointer-events: none; background-size: 3.125% 12.5%; background-image: linear-gradient(to right,#89978e44 1px,transparent 1px),linear-gradient(to bottom,#89978e44 1px,transparent 1px); }
+  #frames { display: flex; gap: 8px; overflow-x: auto; margin-top: 12px; padding-bottom: 4px; }
+  #frames button { flex: 0 0 auto; text-align: left; font-size: 13px; }
+  #frames canvas { margin-bottom: 4px; width: 112px; height: 28px; }
+  output { display: block; color: #bce77f; min-height: 1.5em; margin-top: 8px; }
+  small { color: #acb4ad; }
+</style>
+<header>
+  <div><h1>Editor de boot</h1><p>Civic ES1 · SSD1322 · 256 × 64 · 16 tons de cinza</p></div>
+  <div class="row"><button id="open">Abrir projeto</button><button id="save">Salvar projeto</button></div>
+</header>
+<section aria-label="Área de desenho">
+  <div class="row">
+    <button id="pen" aria-pressed="true">Lápis</button>
+    <button id="erase" aria-pressed="false">Borracha</button>
+    <button id="line" aria-pressed="false">Linha</button>
+    <button id="rect" aria-pressed="false">Retângulo</button>
+    <button id="ellipse" aria-pressed="false">Elipse</button>
+    <button id="circle" aria-pressed="false">Círculo</button>
+    <button id="fill" aria-pressed="false">Balde</button>
+    <button id="picker" aria-pressed="false">Conta-gotas</button>
+    <label><input id="solid" type="checkbox"> Forma preenchida</label>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button id="undo" title="Ctrl+Z">Desfazer</button>
+    <button id="redo" title="Ctrl+Shift+Z">Refazer</button>
+    <button id="clear">Limpar quadro</button>
+    <label><input id="grid" type="checkbox" checked> Grade de 8 px</label>
+    <label><input id="onion" type="checkbox"> Sobrepor quadro anterior</label>
+  </div>
+  <div id="surface" class="surface grid"><canvas id="screen" width="256" height="64" aria-label="Quadro de 256 por 64 pixels"></canvas></div>
+  <div class="row"><div id="palette" aria-label="Tons de cinza"></div><small id="position"></small></div>
+</section>
+<section aria-labelledby="timeline-title">
+  <h2 id="timeline-title">Quadros</h2>
+  <div class="row">
+    <button id="play" class="primary">Reproduzir</button>
+    <label><input type="checkbox" id="loop" checked> Repetir</label>
+    <button id="add">Novo quadro</button>
+    <button id="duplicate">Duplicar</button>
+    <button id="left" aria-label="Mover quadro para a esquerda">←</button>
+    <button id="right" aria-label="Mover quadro para a direita">→</button>
+    <button id="remove">Excluir quadro</button>
+    <label>Duração <input id="duration" type="number" min="20" max="60000" step="1" value="120"> ms</label>
+  </div>
+  <div id="frames" aria-label="Linha do tempo"></div>
+</section>
+<section aria-labelledby="export-title">
+  <h2 id="export-title">Exportar</h2>
+  <div class="row">
+    <button id="png">PNG do quadro</button>
+    <button id="strip">PNG da sequência</button>
+    <button id="array" class="primary">Array Arduino (.h)</button>
+  </div>
+  <output id="status" role="status"></output>
+</section>
+<input id="file" type="file" accept=".json,application/json" hidden>
+<script>
+  'use strict';
+  const WIDTH = 256;
+  const HEIGHT = 64;
+  const SIZE = WIDTH * HEIGHT;
+  const $ = id => document.getElementById(id);
+  const screen = $('screen');
+  const ctx = screen.getContext('2d');
+  const blank = duration => ({ duration, pixels: new Uint8Array(SIZE), undo: [], redo: [] });
+  const toolIds = ['pen', 'erase', 'line', 'rect', 'ellipse', 'circle', 'fill', 'picker'];
+  const shapeTools = ['rect', 'ellipse', 'circle'];
+  let frames = [blank(120)];
+  let selected = 0;
+  let shade = 15;
+  let tool = 'pen';
+  let timer = null;
+  let playing = false;
+  let stroke = null;
+  const current = () => frames[selected];
+
+  function draw(target, pixels, y = 0, previous) {
+    const image = target.createImageData(WIDTH, HEIGHT);
+    for (let i = 0; i < SIZE; i++) {
+      const value = pixels[i] * 17;
+      const offset = i * 4;
+      const ghost = value === 0 && previous ? previous[i] * 4 : 0;
+      image.data[offset] = value;
+      image.data[offset + 1] = value || ghost;
+      image.data[offset + 2] = value || ghost;
+      image.data[offset + 3] = 255;
+    }
+    target.putImageData(image, 0, y);
+  }
+
+  function drawScreen(pixels = current().pixels) {
+    const previous = !playing && $('onion').checked ? frames[selected - 1]?.pixels : undefined;
+    draw(ctx, pixels, 0, previous);
+  }
+
+  function render() {
+    drawScreen();
+    $('surface').classList.toggle('grid', $('grid').checked && !playing);
+    $('duration').value = current().duration;
+    $('play').textContent = playing ? 'Parar' : 'Reproduzir';
+    for (const id of ['add', 'duplicate', 'duration', 'clear', 'open']) $(id).disabled = playing;
+    $('undo').disabled = playing || !current().undo.length;
+    $('redo').disabled = playing || !current().redo.length;
+    $('remove').disabled = playing || frames.length < 2;
+    $('left').disabled = playing || selected === 0;
+    $('right').disabled = playing || selected === frames.length - 1;
+    $('status').textContent = `${frames.length} quadro(s) · ${frames.reduce((sum, frame) => sum + frame.duration, 0)} ms · ${(frames.length * SIZE / 2048).toLocaleString('pt-BR')} KiB de pixels no ESP32`;
+  }
+
+  function timeline() {
+    $('frames').replaceChildren(...frames.map((frame, index) => {
+      const button = document.createElement('button');
+      const thumb = document.createElement('canvas');
+      thumb.width = WIDTH;
+      thumb.height = HEIGHT;
+      draw(thumb.getContext('2d'), frame.pixels);
+      button.append(thumb, `${index + 1} · ${frame.duration} ms`);
+      button.onclick = () => { if (!stroke) { stop(); selected = index; render(); markFrame(); } };
+      return button;
+    }));
+    markFrame();
+  }
+
+  function markFrame() {
+    Array.from($('frames').children).forEach((button, index) =>
+      button.setAttribute('aria-pressed', index === selected));
+  }
+
+  function refresh() { render(); timeline(); }
+
+  function remember() {
+    const history = current().undo;
+    history.push(current().pixels.slice());
+    if (history.length > 24) history.shift();
+    current().redo.length = 0;
+  }
+
+  function point(event) {
+    const rect = screen.getBoundingClientRect();
+    return [
+      Math.max(0, Math.min(WIDTH - 1, Math.floor((event.clientX - rect.left) * WIDTH / rect.width))),
+      Math.max(0, Math.min(HEIGHT - 1, Math.floor((event.clientY - rect.top) * HEIGHT / rect.height)))
+    ];
+  }
+
+  function line(pixels, [x, y], [endX, endY], value) {
+    const dx = Math.abs(endX - x);
+    const dy = -Math.abs(endY - y);
+    const stepX = x < endX ? 1 : -1;
+    const stepY = y < endY ? 1 : -1;
+    let error = dx + dy;
+    while (true) {
+      pixels[y * WIDTH + x] = value;
+      if (x === endX && y === endY) break;
+      const twice = 2 * error;
+      if (twice >= dy) { error += dy; x += stepX; }
+      if (twice <= dx) { error += dx; y += stepY; }
+    }
+  }
+
+  function shape(pixels, [x, y], [endX, endY], kind, value, solid) {
+    if (kind === 'circle') {
+      const dirX = endX < x ? -1 : 1;
+      const dirY = endY < y ? -1 : 1;
+      const span = Math.min(Math.max(Math.abs(endX - x), Math.abs(endY - y)),
+        dirX < 0 ? x : WIDTH - 1 - x, dirY < 0 ? y : HEIGHT - 1 - y);
+      endX = x + span * dirX;
+      endY = y + span * dirY;
+    }
+    const left = Math.min(x, endX), right = Math.max(x, endX);
+    const top = Math.min(y, endY), bottom = Math.max(y, endY);
+    const centerX = (left + right) / 2, centerY = (top + bottom) / 2;
+    const radiusX = (right - left + 1) / 2, radiusY = (bottom - top + 1) / 2;
+    const inside = (px, py) => kind === 'rect'
+      ? px >= left && px <= right && py >= top && py <= bottom
+      : ((px - centerX) / radiusX) ** 2 + ((py - centerY) / radiusY) ** 2 <= 1;
+    for (let py = top; py <= bottom; py++) {
+      for (let px = left; px <= right; px++) {
+        if (inside(px, py) && (solid || !inside(px - 1, py) || !inside(px + 1, py) ||
+            !inside(px, py - 1) || !inside(px, py + 1))) pixels[py * WIDTH + px] = value;
+      }
+    }
+  }
+
+  function flood(pixels, start, value) {
+    const original = pixels[start];
+    if (original === value) return;
+    const queue = [start];
+    pixels[start] = value;
+    function visit(index) {
+      if (pixels[index] !== original) return;
+      pixels[index] = value;
+      queue.push(index);
+    }
+    for (let i = 0; i < queue.length; i++) {
+      const index = queue[i];
+      const x = index % WIDTH;
+      if (x > 0) visit(index - 1);
+      if (x < WIDTH - 1) visit(index + 1);
+      if (index >= WIDTH) visit(index - WIDTH);
+      if (index < SIZE - WIDTH) visit(index + WIDTH);
+    }
+  }
+
+  function trace(pixels, gesture, end) {
+    if (shapeTools.includes(gesture.kind)) {
+      shape(pixels, gesture.start, end, gesture.kind, gesture.value, gesture.solid);
+    } else {
+      line(pixels, gesture.previous, end, gesture.value);
+    }
+  }
+
+  screen.oncontextmenu = event => event.preventDefault();
+  screen.onpointerdown = event => {
+    if (playing || stroke || ![0, 2].includes(event.button)) return;
+    const start = point(event);
+    const index = start[1] * WIDTH + start[0];
+    const pixels = current().pixels;
+    const kind = event.button === 2 ? 'erase' : tool;
+    if (kind === 'picker') {
+      shade = pixels[index];
+      selectTool('pen');
+      return;
+    }
+    if (kind === 'fill') {
+      if (pixels[index] === shade) return;
+      remember();
+      flood(pixels, index, shade);
+      refresh();
+      return;
+    }
+    screen.setPointerCapture(event.pointerId);
+    stroke = { id: event.pointerId, start, previous: start, kind, value: kind === 'erase' ? 0 : shade,
+      solid: $('solid').checked, pixels: pixels.slice(), freehand: kind === 'pen' || kind === 'erase' };
+    trace(stroke.pixels, stroke, start);
+    drawScreen(stroke.pixels);
+  };
+  screen.onpointermove = event => {
+    const next = point(event);
+    $('position').textContent = `x ${next[0]} · y ${next[1]}`;
+    if (stroke?.id !== event.pointerId) return;
+    if (!stroke.freehand) stroke.pixels.set(current().pixels);
+    trace(stroke.pixels, stroke, next);
+    if (stroke.freehand) stroke.previous = next;
+    drawScreen(stroke.pixels);
+  };
+  screen.onpointerup = event => {
+    if (stroke?.id !== event.pointerId) return;
+    if (!stroke.freehand) stroke.pixels.set(current().pixels);
+    trace(stroke.pixels, stroke, point(event));
+    if (stroke.pixels.some((value, index) => value !== current().pixels[index])) {
+      remember();
+      current().pixels = stroke.pixels;
+    }
+    stroke = null;
+    refresh();
+  };
+  screen.onpointercancel = screen.onlostpointercapture = event => {
+    if (stroke?.id !== event.pointerId) return;
+    stroke = null;
+    drawScreen();
+  };
+
+  function selectTool(id) {
+    tool = id;
+    toolIds.forEach(name => $(name).setAttribute('aria-pressed', name === tool));
+    $('solid').disabled = !shapeTools.includes(tool);
+    Array.from($('palette').children).forEach((button, index) =>
+      button.setAttribute('aria-pressed', tool !== 'erase' && index === shade));
+  }
+
+  for (let level = 0; level < 16; level++) {
+    const button = document.createElement('button');
+    button.textContent = level;
+    button.title = `Tom ${level} de 15`;
+    button.style.background = `rgb(${level * 17} ${level * 17} ${level * 17})`;
+    button.style.color = level < 8 ? '#fff' : '#000';
+    button.onclick = () => { shade = level; selectTool(tool === 'erase' || tool === 'picker' ? 'pen' : tool); };
+    $('palette').append(button);
+  }
+  selectTool('pen');
+  toolIds.forEach(id => { $(id).onclick = () => selectTool(id); });
+  $('grid').onchange = render;
+  $('onion').onchange = render;
+  function restore(from, to) {
+    if (stroke || playing || !current()[from].length) return;
+    current()[to].push(current().pixels);
+    current().pixels = current()[from].pop();
+    refresh();
+  }
+  $('undo').onclick = () => restore('undo', 'redo');
+  $('redo').onclick = () => restore('redo', 'undo');
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && stroke) {
+      const id = stroke.id;
+      stroke = null;
+      screen.releasePointerCapture(id);
+      drawScreen();
+    }
+    if (!(event.ctrlKey || event.metaKey) || event.altKey || event.target.closest('input, textarea, [contenteditable]')) return;
+    const key = event.key.toLowerCase();
+    if (key !== 'z' && key !== 'y') return;
+    event.preventDefault();
+    $(key === 'y' || event.shiftKey ? 'redo' : 'undo').click();
+  });
+  $('clear').onclick = () => { if (!stroke) { remember(); current().pixels.fill(0); refresh(); } };
+  function insert(copy) {
+    if (stroke) return;
+    const frame = blank(current().duration);
+    if (copy) frame.pixels.set(current().pixels);
+    frames.splice(++selected, 0, frame);
+    refresh();
+    $('frames').children[selected].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+  $('add').onclick = () => insert(false);
+  $('duplicate').onclick = () => insert(true);
+  $('remove').onclick = () => {
+    if (stroke || !confirm(`Excluir o quadro ${selected + 1}?`)) return;
+    frames.splice(selected, 1);
+    selected = Math.min(selected, frames.length - 1);
+    refresh();
+  };
+  function move(offset) {
+    if (stroke) return;
+    const next = selected + offset;
+    [frames[selected], frames[next]] = [frames[next], frames[selected]];
+    selected = next;
+    refresh();
+  }
+  $('left').onclick = () => move(-1);
+  $('right').onclick = () => move(1);
+  $('duration').onchange = () => {
+    if ($('duration').validity.valid && $('duration').value) current().duration = $('duration').valueAsNumber;
+    refresh();
+  };
+
+  function stop() {
+    clearTimeout(timer);
+    playing = false;
+    render();
+  }
+
+  function tick() {
+    render();
+    markFrame();
+    timer = setTimeout(() => {
+      if (selected === frames.length - 1 && !$('loop').checked) { stop(); return; }
+      selected = (selected + 1) % frames.length;
+      tick();
+    }, current().duration);
+  }
+  $('play').onclick = () => {
+    if (stroke) return;
+    if (playing) { stop(); return; }
+    selected = 0;
+    playing = true;
+    tick();
+  };
+
+  function download(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function exportPng(items, name) {
+    const canvas = document.createElement('canvas');
+    canvas.width = WIDTH;
+    canvas.height = HEIGHT * items.length;
+    const target = canvas.getContext('2d');
+    items.forEach((frame, index) => draw(target, frame.pixels, index * HEIGHT));
+    canvas.toBlob(blob => {
+      if (blob) download(blob, name);
+      else $('status').textContent = 'Não foi possível gerar o PNG. Tente exportar um quadro por vez.';
+    }, 'image/png');
+  }
+  $('png').onclick = () => exportPng([current()], `boot-quadro-${selected + 1}.png`);
+  $('strip').onclick = () => exportPng(frames, 'boot-sequencia.png');
+
+  function pack(pixels) {
+    const bytes = new Uint8Array(SIZE / 2);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = (pixels[2 * i] << 4) | pixels[2 * i + 1];
+    return bytes;
+  }
+
+  function header() {
+    const data = frames.map(frame => {
+      const bytes = Array.from(pack(frame.pixels), value => '0x' + value.toString(16).padStart(2, '0'));
+      const rows = [];
+      for (let i = 0; i < bytes.length; i += 16) rows.push('    ' + bytes.slice(i, i + 16).join(', ') + ',');
+      return '  {\n' + rows.join('\n') + '\n  },';
+    });
+    return [
+      '#pragma once', '#include <Arduino.h>', '',
+      '// SSD1322: cada byte contém dois pixels, da esquerda para a direita.',
+      `constexpr uint16_t bootWidth = ${WIDTH};`,
+      `constexpr uint16_t bootHeight = ${HEIGHT};`,
+      `constexpr size_t bootFrameCount = ${frames.length};`,
+      'constexpr size_t bootFrameBytes = bootWidth * bootHeight / 2;',
+      `const uint16_t bootDurationMs[bootFrameCount] PROGMEM = { ${frames.map(frame => frame.duration).join(', ')} };`,
+      'const uint8_t bootFrames[bootFrameCount][bootFrameBytes] PROGMEM = {',
+      ...data, '};', ''
+    ].join('\n');
+  }
+  $('array').onclick = () => download(new Blob([header()], { type: 'text/plain' }), 'boot_animacao.h');
+  $('save').onclick = () => {
+    const project = { version: 1, width: WIDTH, height: HEIGHT, frames: frames.map(({ duration, pixels }) =>
+      ({ duration, pixels: Array.from(pixels, value => value.toString(16)).join('') })) };
+    download(new Blob([JSON.stringify(project)], { type: 'application/json' }), 'boot-projeto.json');
+  };
+  $('open').onclick = () => $('file').click();
+  $('file').onchange = async () => {
+    const file = $('file').files[0];
+    $('file').value = '';
+    if (!file) return;
+    try {
+      const project = JSON.parse(await file.text());
+      if (project?.version !== 1 || project.width !== WIDTH || project.height !== HEIGHT ||
+          !Array.isArray(project.frames) || !project.frames.length) throw new Error();
+      const loaded = project.frames.map(frame => {
+        if (!Number.isInteger(frame?.duration) || frame.duration < 20 || frame.duration > 60000 ||
+            typeof frame.pixels !== 'string' || frame.pixels.length !== SIZE || /[^0-9a-f]/i.test(frame.pixels)) throw new Error();
+        const loadedFrame = blank(frame.duration);
+        loadedFrame.pixels.set(Uint8Array.from(frame.pixels, value => parseInt(value, 16)));
+        return loadedFrame;
+      });
+      if ((frames.length > 1 || current().pixels.some(Boolean) || current().undo.length || current().duration !== 120) &&
+          !confirm('Substituir o projeto que está aberto?')) return;
+      stop();
+      frames = loaded;
+      selected = 0;
+      refresh();
+    } catch {
+      $('status').textContent = 'Arquivo de projeto inválido. Abra um JSON salvo por este editor.';
+    }
+  };
+  refresh();
+</script>
+</html>
