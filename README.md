@@ -12,24 +12,29 @@ Olhando a placa pela frente, com a antena para cima e os conectores para baixo, 
 2. No Arduino IDE, instale o pacote **esp32 by Espressif Systems** e a biblioteca **U8g2**. Abra `painel_oled/painel_oled.ino`. O IDE inclui `fonte_painel.cpp` da mesma pasta na compilação.
 3. Selecione o modelo da placa ou **ESP32S3 Dev Module** para uma placa genérica. Ajuste **Flash Size** à capacidade da placa, selecione a porta USB da placa e clique em **Carregar**. O painel começa ao ligar ou reiniciar, sem carro, adaptador, botão ou entrada serial.
 
-O RPM aparece em destaque, acima da velocidade em km/h e da temperatura do motor em °C. À direita, o gráfico mostra cerca de 3,5 s de histórico de RPM, com as amostras mais recentes na extremidade direita.
+Ao ligar, o OLED mostra a logo metálica da Slow Car Race Club dando duas voltas contínuas antes de abrir a tela Geral. A animação dura cerca de 3,2 s. O clique curto no switch entre **GPIO 4 e GND** percorre as telas na ordem abaixo. Segurar por cerca de **0,8 s** volta à Geral. O switch usa pull-up interno e debounce de 25 ms.
 
-O switch mecânico entre **GPIO 4 e GND** usa o pull-up interno, com debounce de 25 ms. O painel abre na tela principal e a simulação roda continuamente nas duas telas.
-
-| Gesto | Ação |
+| Tela | Leituras e gráfico |
 | --- | --- |
-| Clique curto e solte | Alterna entre o painel com gráfico de RPM e a tela com velocidade em destaque, que mostra RPM e temperatura à direita. |
-| Segure por cerca de 0,8 s | Volta à tela principal enquanto o botão está pressionado. Soltar depois disso não troca a tela novamente. |
+| Geral | RPM, arrefecimento, borboleta e tensão da bateria. |
+| Giro | RPM com o gráfico de barras original e posição da borboleta. |
+| Temperaturas | Ar de admissão e líquido de arrefecimento com gráficos de barras separados. |
+| Sonda | Tensão da sonda em volts com gráfico de barras. |
+| Correções de combustível | Correções de curto prazo (STFT) e longo prazo (LTFT), em porcentagem, com um gráfico de linha para cada leitura. |
+| Bateria | Tensão em volts e gráfico de barras. |
+| Avanço | Avanço de ignição em graus com gráfico de barras e referência em 0°. |
+| Apresentação | Repete a animação da Slow Car Race Club. Clique para avançar aos Golfinhos. |
+| Golfinhos | Repete o clipe Diverdolphins em tons de cinza. Clique para voltar à Geral. |
 
-| Tempo no ciclo | O que observar |
-| --- | --- |
-| 0 a 3 s | Marcha lenta em 820 RPM e velocidade válida de 0 km/h. |
-| 3 a 15 s | Aceleração e quedas de RPM nas trocas aos 7 e 12 s, enquanto a velocidade se mantém durante cada troca. |
-| 15 a 23 s | Desaceleração até parar. |
-| 24 a 26 s | As três leituras aparecem como `--` e o gráfico registra uma lacuna. Observe o retorno de `0 km/h` após a interrupção. |
-| 28 s | O ciclo recomeça. |
+O clipe [Diverdolphins](https://github.com/youxufkhan/carozerra/blob/main/assets/clips/alt_diverdolphins.lkd) vem do acervo Carozerra. O firmware guarda os quadros de 128 × 33 compactados e os amplia para o OLED. Para regenerar a animação a partir do arquivo `alt_diverdolphins.lkd`, execute na raiz do projeto:
 
-A interface `AmostraPainel`, em `painel_oled/fonte_painel.h`, carrega valor, unidade e validade de cada leitura. Para ligar uma reprodução CSV ou um ELM327 Wi-Fi, substitua as chamadas a `lerSimulacao` por uma fonte que devolva a mesma amostra. Mantenha a consulta ou reprodução fora da renderização e devolva as leituras disponíveis sem bloquear a atualização. A escolha e a validação do protocolo da ECU ficam para uma etapa posterior.
+```powershell
+python animacao/converter-lkd.py alt_diverdolphins.lkd | node animacao/gerar-boot.cjs --golfinhos
+```
+
+As leituras usam dígitos de sete segmentos. Os gráficos usam barras em degradê, com colunas mais finas nas telas com dois gráficos. As escalas com valores negativos mostram as barras acima ou abaixo do zero. Os gráficos guardam cerca de 3,5 s de histórico. O ciclo simulado dura 28 s. Entre 24 e 26 s, todas as leituras ficam indisponíveis. As telas continuam mostrando seus próprios sinais, com `--` nos valores e lacunas nos gráficos.
+
+O renderizador recebe uma `AmostraPainel` com valores e validade por sinal. A interface `FontePainel`, em `painel_oled/fonte_painel.h`, define como o loop obtém a amostra. Para integrar o ELM futuramente, substitua `fonte` por uma função que devolva as últimas leituras do adaptador sem bloquear. A fonte deve usar RPM, °C, porcentagem, volts e graus conforme o campo. Renderização, navegação e histórico são reaproveitados.
 
 ## Coleta OBD2 sem notebook
 

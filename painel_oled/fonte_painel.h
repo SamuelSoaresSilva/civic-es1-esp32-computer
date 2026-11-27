@@ -3,17 +3,22 @@
 #include <stdint.h>
 
 struct Leitura {
-  int16_t valor;
-  const char *unidade;
+  float valor;
   bool valida;
 };
 
 struct AmostraPainel {
   Leitura rpm;
-  Leitura velocidade;
-  Leitura temperatura;
+  Leitura borboleta;
+  Leitura arAdmissao;
+  Leitura arrefecimento;
+  Leitura sonda;
+  Leitura ajusteCurto;
+  Leitura ajusteLongo;
+  Leitura tensao;
+  Leitura avanco;
 };
 
-// Recebe o tempo desde a inicialização. Uma fonte futura deve devolver
-// a amostra disponível sem bloquear a atualização do painel.
+// A fonte devolve o último valor disponível de cada sinal, sem bloquear.
+using FontePainel = AmostraPainel (*)(uint32_t tempoMs);
 AmostraPainel lerSimulacao(uint32_t tempoMs);

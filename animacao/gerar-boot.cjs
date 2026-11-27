@@ -1,11 +1,15 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const project = JSON.parse(fs.readFileSync(path.join(__dirname, 'boot-projeto.json'), 'utf8'));
+const golfinhos = process.argv[2] === '--golfinhos';
+const prefix = golfinhos ? 'golfinhos' : 'boot';
+const source = golfinhos ? 0 : path.join(__dirname, 'boot-projeto.json');
+const project = JSON.parse(fs.readFileSync(source, 'utf8'));
 const { width, height, frames } = project;
-if (project.version !== 1 || width !== 256 || height !== 64 ||
+const [expectedWidth, expectedHeight] = golfinhos ? [128, 33] : [256, 64];
+if (project.version !== 1 || width !== expectedWidth || height !== expectedHeight ||
     !Array.isArray(frames) || frames.length === 0) {
-  throw new Error('O projeto precisa ter pelo menos um quadro de 256 × 64.');
+  throw new Error(`O projeto precisa ter pelo menos um quadro de ${expectedWidth} × ${expectedHeight}.`);
 }
 
 const frameBytes = width * height / 2;
@@ -39,17 +43,19 @@ for (let i = 0; i < data.length; i += 16) {
 }
 
 const header = [
-  '// Gerado por node animacao/gerar-boot.cjs a partir de animacao/boot-projeto.json.',
+  golfinhos
+    ? '// Gerado por animacao/converter-lkd.py e node animacao/gerar-boot.cjs --golfinhos.'
+    : '// Gerado por node animacao/gerar-boot.cjs a partir de animacao/boot-projeto.json.',
   '#pragma once',
   '#include <Arduino.h>',
   '',
-  `constexpr size_t BOOT_FRAME_BYTES = ${frameBytes};`,
-  `const uint16_t bootDurationMs[] PROGMEM = { ${durations.join(', ')} };`,
+  `constexpr size_t ${prefix.toUpperCase()}_FRAME_BYTES = ${frameBytes};`,
+  `const uint16_t ${prefix}DurationMs[] PROGMEM = { ${durations.join(', ')} };`,
   '// Bit 7 indica bytes novos. Os outros bits guardam o comprimento menos um.',
-  'const uint8_t bootDelta[] PROGMEM = {',
+  `const uint8_t ${prefix}Delta[] PROGMEM = {`,
   ...rows,
   '};',
   ''
 ].join('\n');
-fs.writeFileSync(path.join(__dirname, '..', 'painel_oled', 'boot_animacao.h'), header);
+fs.writeFileSync(path.join(__dirname, '..', 'painel_oled', `${prefix}_animacao.h`), header);
 console.log(`${frames.length} quadros, ${frames.length * frameBytes} bytes originais → ${data.length} bytes comprimidos.`);

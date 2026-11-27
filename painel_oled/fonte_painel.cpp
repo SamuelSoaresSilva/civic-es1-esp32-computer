@@ -1,31 +1,33 @@
 #include "fonte_painel.h"
+#include <math.h>
 
 namespace {
 struct Ponto {
   uint32_t tempoMs;
-  int16_t rpm;
-  int16_t velocidade;
-  int16_t temperatura;
+  float rpm;
+  float borboleta;
+  float ar;
+  float liquido;
+  float avanco;
 };
 
 constexpr Ponto roteiro[] = {
-    {0,     820,  0, 86},  // Marcha lenta.
-    {3000,  820,  0, 86},
-    {4000, 2200, 12, 86},
-    {7000, 5500, 42, 88},  // Aceleração em primeira.
-    {7500, 3200, 42, 88},  // Troca para segunda.
-    {12000, 5100, 69, 91},
-    {12500, 3500, 69, 91}, // Troca para terceira.
-    {15000, 4100, 81, 92},
-    {18000, 2300, 51, 91}, // Desaceleração.
-    {21000, 1100, 17, 89},
-    {23000,  820,  0, 88},
-    {28000,  820,  0, 86},
+    {0,     820,  8, 36, 83,  12},
+    {3000,  820,  8, 36, 84,  12},
+    {4000, 2200, 55, 34, 84,  23},
+    {7000, 6800, 82, 31, 86,  32},
+    {7500, 3200, 20, 31, 86,  16},
+    {12000, 5100, 74, 29, 89, 34},
+    {12500, 3500, 18, 29, 89, 14},
+    {15000, 4100, 57, 28, 91, 29},
+    {18000, 2300,  9, 30, 91, -4},
+    {23000,  820,  8, 34, 87, 12},
+    {28000,  820,  8, 36, 83, 12},
 };
 constexpr auto totalPontos = sizeof(roteiro) / sizeof(roteiro[0]);
 
-int16_t interpolar(int16_t inicio, int16_t fim, int32_t tempo, int32_t duracao) {
-  return inicio + (static_cast<int32_t>(fim) - inicio) * tempo / duracao;
+float interpolar(float inicio, float fim, float fracao) {
+  return inicio + (fim - inicio) * fracao;
 }
 }  // namespace
 
@@ -37,12 +39,18 @@ AmostraPainel lerSimulacao(uint32_t tempoMs) {
   }
   const Ponto &inicio = roteiro[indice - 1];
   const Ponto &fim = roteiro[indice];
-  const int32_t tempo = fase - inicio.tempoMs;
-  const int32_t duracao = fim.tempoMs - inicio.tempoMs;
+  const float fracao = static_cast<float>(fase - inicio.tempoMs) / (fim.tempoMs - inicio.tempoMs);
   const bool disponivel = fase < 24000 || fase >= 26000;
+  const float segundos = fase / 1000.0f;
   return {
-      {interpolar(inicio.rpm, fim.rpm, tempo, duracao), "RPM", disponivel},
-      {interpolar(inicio.velocidade, fim.velocidade, tempo, duracao), "km/h", disponivel},
-      {interpolar(inicio.temperatura, fim.temperatura, tempo, duracao), "\xC2\xB0" "C", disponivel},
+      {interpolar(inicio.rpm, fim.rpm, fracao), disponivel},
+      {interpolar(inicio.borboleta, fim.borboleta, fracao), disponivel},
+      {interpolar(inicio.ar, fim.ar, fracao), disponivel},
+      {interpolar(inicio.liquido, fim.liquido, fracao), disponivel},
+      {0.45f + 0.35f * sinf(segundos * 6), disponivel},
+      {5.0f * sinf(segundos * 2), disponivel},
+      {-2.0f, disponivel},
+      {13.85f + 0.23f * sinf(segundos * 1.4f), disponivel},
+      {interpolar(inicio.avanco, fim.avanco, fracao), disponivel},
   };
 }
