@@ -16,7 +16,7 @@ Ao ligar, o OLED mostra a logo metálica da Slow Car Race Club dando duas voltas
 
 | Tela | Leituras e gráfico |
 | --- | --- |
-| Geral | RPM, arrefecimento, borboleta e tensão da bateria. |
+| Geral | RPM, arrefecimento, borboleta e tensão da bateria. Pisca o quadrante acima de 98 °C, abaixo de 11,8 V ou abaixo de 600 RPM com o motor girando. |
 | Giro | RPM com o gráfico de barras original e posição da borboleta. |
 | Temperaturas | Ar de admissão e líquido de arrefecimento com gráficos de barras separados. |
 | Sonda | Tensão da sonda em volts com gráfico de barras. |

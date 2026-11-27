@@ -26,7 +26,10 @@ static_assert(BARS_LEFT >= GRAPH_LEFT, "As barras de RPM precisam caber no grafi
 constexpr int MIN_GRAY = 2;  // 2/15: primeiro nível acima de 10% da escala.
 constexpr int RPM_MAX = 8000;
 constexpr int SHIFT_RPM = 6000;
-constexpr uint32_t SHIFT_HALF_PERIOD_MS = 200;
+constexpr float COOLANT_ALERT_C = 98.0f;
+constexpr float BATTERY_ALERT_V = 11.8f;
+constexpr float LOW_RPM_ALERT = 600.0f;
+constexpr uint32_t ALERT_HALF_PERIOD_MS = 200;
 constexpr uint32_t SAMPLE_MS = 100;
 constexpr int DOLPHIN_WIDTH = 128;
 constexpr int DOLPHIN_HEIGHT = 33;
@@ -429,7 +432,37 @@ void drawOverviewIcon(int x, int y, const char (&icon)[16][17]) {
   }
 }
 
-void drawPanel(Tela tela, const AmostraPainel &amostra) {
+void invertOverviewQuadrant(int left, int top) {
+  constexpr int width = WIDTH / 2;
+  constexpr int height = HEIGHT / 2;
+  constexpr int diagonal = (width - 1) + (height - 1) * 4;
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      const int screenX = left + x;
+      const int screenY = top + y;
+      const uint8_t pair = pixels[screenY * (WIDTH / 2) + screenX / 2];
+      const uint8_t ink = screenX % 2 == 0 ? pair >> 4 : pair & 0xf;
+      const uint8_t brightness = 5 + (x + y * 4) * 10 / diagonal;
+      setPixel(screenX, screenY, ink ? 0 : brightness);
+    }
+  }
+}
+
+void drawOverviewAlerts(const AmostraPainel &amostra) {
+  if (amostra.rpm.valida && amostra.rpm.valor > 0 && amostra.rpm.valor < LOW_RPM_ALERT) {
+    invertOverviewQuadrant(0, 0);
+  }
+  if (amostra.arrefecimento.valida && isfinite(amostra.arrefecimento.valor) &&
+      amostra.arrefecimento.valor > COOLANT_ALERT_C) {
+    invertOverviewQuadrant(WIDTH / 2, 0);
+  }
+  if (amostra.tensao.valida && isfinite(amostra.tensao.valor) &&
+      amostra.tensao.valor < BATTERY_ALERT_V) {
+    invertOverviewQuadrant(WIDTH / 2, HEIGHT / 2);
+  }
+}
+
+void drawPanel(Tela tela, const AmostraPainel &amostra, uint32_t now) {
   memset(pixels, 0, sizeof(pixels));
   oled.clearBuffer();
   switch (tela) {
@@ -492,6 +525,9 @@ void drawPanel(Tela tela, const AmostraPainel &amostra) {
       }
     }
   }
+  if (tela == Tela::Geral && (now / ALERT_HALF_PERIOD_MS) % 2 == 0) {
+    drawOverviewAlerts(amostra);
+  }
   sendFrame();
 }
 
@@ -509,7 +545,7 @@ void setup() {
   startedAt = millis();
   lastSampleAt = startedAt;
   recordSample(fonte(0));
-  drawPanel(telaAtual, amostraAtual);
+  drawPanel(telaAtual, amostraAtual, startedAt);
 }
 
 void loop() {
@@ -536,7 +572,7 @@ void loop() {
     if (mudouShift) {
       shiftInicio = now;
     }
-    const bool iluminado = ((now - shiftInicio) / SHIFT_HALF_PERIOD_MS) % 2 == 0;
+    const bool iluminado = ((now - shiftInicio) / ALERT_HALF_PERIOD_MS) % 2 == 0;
     if (mudouShift || iluminado != shiftIluminado) {
       shiftIluminado = iluminado;
       drawShiftLight(iluminado);
@@ -555,6 +591,6 @@ void loop() {
     telaAtual = Tela::Geral;
   }
   if (novaAmostra || telaAtual != anterior || mudouShift) {
-    drawPanel(telaAtual, amostraAtual);
+    drawPanel(telaAtual, amostraAtual, now);
   }
 }
